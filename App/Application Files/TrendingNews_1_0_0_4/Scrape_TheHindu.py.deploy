@@ -1,0 +1,105 @@
+#!/bin/python2
+import urllib
+import re
+from bs4 import BeautifulSoup
+from threading import Thread
+import datetime
+from dateutil.parser import parse as time_parse
+import time
+import calendar
+
+#Definition of conditions for matching of an HTML tag with timestamp, etc.
+def timestamp_condition(tag):
+    return tag.name == 'div' and tag.has_attr('class') and\
+           tag['class'][0] == 'ut-container'
+
+def content_condition(tag):
+    regex = 'content-body-.+'
+    content_pattern = re.compile(regex)
+    return tag.name == 'div' and tag.has_attr('id') and\
+           re.match(content_pattern, tag['id'])
+        
+def fresh_article_condition(tag):
+    try:
+        return tag.name == 'a' and tag.parent.parent.span and\
+               tag.parent.parent.span.has_attr('class') and\
+               tag.parent.parent.span['class'][0] == 'justIn-number'
+    except:
+        return False
+        
+#Scrapes article from The Hindu
+def scrape_article(url):
+    try:
+        htmltext = urllib.urlopen(url).read()
+    except:
+        return
+    info = {}
+    info['source'] = 'The Hindu' 
+    info['url'] = url
+    soup = BeautifulSoup(htmltext, 'html.parser')
+    
+    try:
+        info['heading'] = soup.title.string.split(' - The Hindu')[0].strip()
+    except:
+        info['heading'] = 'None'
+            
+    info['timestamp'] = ''
+    try:
+        for tag in soup.find_all(timestamp_condition):
+            info['timestamp'] = tag.find_all('span')[1].none.string.strip()
+        info['timestamp'] = calendar.timegm(time_parse(info['timestamp'],
+                                            ignoretz=True).utctimetuple())
+    except:
+        pass
+    if info['timestamp'] == '':
+        info['timestamp'] = calendar.timegm(datetime.datetime.now().\
+                                            utctimetuple())
+
+    info['content'] = ''
+    try:
+        for tag in soup.find_all(content_condition):
+            info['content'] = ''
+            for para in tag.find_all('p'):
+                for string in para.strings:
+                    info['content'] += string + ' '
+    except:
+        pass
+    if info['content'] == '':
+        return
+
+    if 'business' in info['url']:
+        info['type'] = 'Business'
+    elif 'sport' in info['url']:
+        info['type'] = 'Sports'
+    elif 'fitness' in info['url']:
+        info['type'] = 'Fitness'
+    elif 'life-and-style' in info['url']:
+        info['type'] = 'Lifestyle'
+    elif 'entertainment' in info['url']:
+        info['type'] = 'Entertainment'
+    elif 'international' in info['url']:
+        info['type'] = 'World'
+    elif 'national' in info['url'] or 'states' in info['url']:
+        info['type'] = 'India'
+    elif 'cities' in info['url']:
+        info['type'] = 'City'
+    elif 'sci-tech' in info['url']:
+        info['type'] = 'Technology'
+    else:
+        info['type'] = 'Others'
+
+    return info
+
+#Scrape the main website for links to new articles
+def extract_data():
+    try:
+        htmltext = urllib.urlopen('http://www.thehindu.com/news').read()
+    except:
+        return
+    soup = BeautifulSoup(htmltext, 'html.parser')
+
+    urls = []
+    for tag in soup.find_all(fresh_article_condition):
+        urls.append(tag['href'])
+    return urls 
+

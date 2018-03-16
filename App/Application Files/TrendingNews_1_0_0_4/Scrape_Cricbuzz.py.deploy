@@ -1,0 +1,82 @@
+import urllib
+from bs4 import BeautifulSoup as soup
+import re
+from urlparse import urljoin
+import datetime
+from dateutil.parser import parse
+import calendar
+
+def scrape_article(site):
+    heading=None
+    matter=None
+    author=None
+    date=None
+    source = "Cricbuzz"
+    try:
+        page = urllib.urlopen(site)
+        page_soup = soup(page,"html.parser")
+        page.close()
+    except:
+        return
+
+    try:
+    	if "cricbuzz" in site:
+            content = page_soup.find("article", itemtype=True)
+            heading = page_soup.find("h1").string.strip()
+            para = content.find_all("p")
+            matter = u''
+            for x in para:
+                string = x.string
+                if string is not None:
+                    matter = matter + string
+        if matter:
+        	pass
+        else:
+        	return
+    except:
+    	return
+
+    types = "Sports"
+    try:
+        date = content.find("time")["datetime"]
+        date= parse(date)
+        date = calendar.timegm(date.utctimetuple())
+    except:
+        date = datetime.datetime.now()
+    	date = calendar.timegm(date.utctimetuple())
+    
+    dictionary={"heading":heading, "source":source, "timestamp":date,
+        "content":matter, "url":site, "type":types}
+
+    return dictionary
+
+def extract_data():
+	main_site = "http://www.cricbuzz.com/"
+	#create a dictionary
+	links= []
+	#get all the content of main page
+	try:
+		main_page = urllib.urlopen(main_site)
+		main_page_soup = soup(main_page,"html.parser")
+		main_page.close()
+	except:
+		return
+
+	#get all links of main page that are with titles
+	lists = main_page_soup.find_all("div", class_=True)
+
+	for x in lists:
+		all_links = x.find_all("a", title=True)
+		if all_links:
+			for link in all_links:
+				if link:	
+					heading = link.string
+					url = link.get("href")
+					if url:
+						if "http" not in url:
+							url = urljoin(main_site,url)
+						if heading is not None:
+							if len(heading.split()) > 2:
+								links.append(url)
+	
+	return links

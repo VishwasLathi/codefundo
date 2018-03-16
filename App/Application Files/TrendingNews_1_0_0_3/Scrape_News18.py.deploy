@@ -1,0 +1,163 @@
+#!/bin/python2
+import urllib
+from bs4 import BeautifulSoup
+from threading import Thread
+import datetime
+from dateutil.parser import parse as time_parse
+import calendar
+import re
+
+#Definition of conditions for matching of an HTML tag with timestamp, etc.
+def timestamp_conditions(url):
+    if 'cricketnext' in url:
+        def timestamp_condition(tag):
+            return tag.name == 'div' and tag.has_attr('class') and\
+                   len(tag['class']) == 2 and tag['class'][0] == 'fleft' and\
+                   tag['class'][1] == 'bctextbox'
+    else:
+        def timestamp_condition(tag):
+            return tag.name == 'span' and tag.parent.name == 'div' and\
+                   tag.parent.has_attr('class') and tag.parent['class'][0] ==\
+                   'author' 
+    return timestamp_condition
+
+def content_conditions(url):
+    if 'cricketnext' in url:
+        def content_condition(tag):
+            return tag.name == 'article' and tag.has_attr('class') and\
+                   tag['class'][0] == 'paragraph'
+    else:
+        def content_condition(tag):
+            return tag.name == 'div' and tag.has_attr('id') and\
+                   tag['id'] == 'article_body'
+    return content_condition
+        
+def fresh_article_condition(tag):
+    try:
+        return tag.name == 'a' and ((tag.parent.name == 'div' and\
+               tag.parent.has_attr('class') and tag.parent['class'][0] ==
+               'blog-list-blog') or (tag.parent.parent and tag.parent.parent.\
+               parent and tag.parent.parent.parent.name == 'div' and\
+               tag.parent.parent.parent.has_attr('class') and\
+               tag.parent.parent.parent['class'] == 'section-blog-left-img-'\
+               'list') or (tag.parent.parent and tag.parent.parent.name ==
+               'div' and tag.parent.parent.has_attr('class') and tag.parent.\
+               parent['class'] == 'section-bllog-left-img'))
+    except:
+        return False
+        
+#Scrapes article from News18
+def scrape_article(url):
+    try:
+        htmltext = urllib.urlopen(url).read()
+    except:
+        return
+    info = {}
+    info['source'] = 'News18' 
+    info['url'] = url
+    soup = BeautifulSoup(htmltext, 'html.parser')
+    if 'photogallery' in url or 'videos' in url:
+        return
+    
+    try:
+        info['heading'] = soup.title.string.split(' - News18')[0].strip()
+    except:
+        info['heading'] = 'None'
+            
+    info['timestamp'] = ''
+    try:
+        for tag in soup.find_all(timestamp_conditions(url)):
+            if 'cricketnext' in url:
+                info['timestamp'] = list(tag.strings)[-1].split('Updated:')[-1]\
+                                    .strip()
+            else:
+                info['timestamp'] = list(tag.strings)[1].strip()
+        try:
+            info['timestamp'] = calendar.timegm(time_parse(info['timestamp'],
+                                                ignoretz=True).utctimetuple())
+        except:
+            pass
+    except:
+        pass
+    if info['timestamp'] == '':
+        info['timestamp'] = calendar.timegm(datetime.datetime.now().utctimetuple())
+
+    info['content'] = ''
+    try:
+        for tag in soup.find_all(content_conditions(url)):
+            info['content'] = ''.join([string for string in tag.strings if
+                                       (not any(string in tag_div.strings for
+                                       tag_div in tag.find_all('div'))) and (
+                                       not tag.figure or string not in tag.\
+                                       figure.strings) and (not any(string in
+                                       tag_a.strings for tag_a in tag.find_all(
+                                       'a'))) and (not any(string in tag_tweet.\
+                                       strings for tag_tweet in tag.find_all(
+                                       'blockquote'))) and (not any(string in
+                                       tag_style.strings for tag_style in tag.\
+                                       find_all('style'))) and (not any(string\
+                                       in tag_script.strings for tag_script in
+                                       tag.find_all('script')))]).strip()
+    except:
+        pass
+    # Following is for removing the location
+    try:
+        content_start = info['content'][:20]
+        regex = '^.+: '
+        pattern = re.compile(regex)
+        if re.match(pattern, content_start):
+            info['content'] = content_start.split(': ')[1] + info['content']\
+                              [20:]
+    except:
+        pass
+    # Following is for removing trailing useless entries like 'ALSO READ:'
+    try:
+        content_end = info['content'][-25:]
+        regex = '\([^\)]+\)'
+        pattern = re.compile(regex)
+        if 'ALSO READ' in content_end:
+            info['content'] = info['content'][:-25] + content_end.split(
+                              'ALSO READ')[0].strip()
+        elif re.match(pattern, content_end):
+            info['content'] = info['content'][:-25] + content_end.split('(')\
+                              [0].strip()
+    except:
+        pass
+    if info['content'] == '':
+        pass
+
+    if 'business' in info['url']:
+        info['type'] = 'Business'
+    elif 'tech' in info['url'] or 'auto' in info['url']:
+        info['type'] = 'Technology'
+    elif 'sports' in info['url'] or 'cricket' in info['url'] or 'football' in\
+    info['url']:
+        info['type'] = 'Sports'
+    elif 'fitness' in info['url']:
+        info['type'] = 'Fitness'
+    elif 'lifestyle' in info['url'] or 'food' in info['url']:
+        info['type'] = 'Lifestyle'
+    elif 'movies' in info['url']:
+        info['type'] = 'Entertainment'
+    elif 'world' in info['url']:
+        info['type'] = 'World'
+    elif 'india' in info['url'] or 'politics' in info['url']:
+        info['type'] = 'India'
+    else:
+        info['type'] = 'Others'
+
+    return info
+
+#Scrape the main website for links to new articles
+def extract_data():
+    try:
+        htmltext = urllib.urlopen('http://www.news18.com/news').read()
+    except:
+        return
+    soup = BeautifulSoup(htmltext, 'html.parser')
+
+    urls = []
+    for tag in soup.find_all(fresh_article_condition):
+        urls.append(tag['href'])
+    return urls 
+

@@ -1,0 +1,182 @@
+#!/bin/python2
+import urllib
+import urlparse
+import re
+from bs4 import BeautifulSoup
+from threading import Thread
+import datetime
+from dateutil.parser import parse as time_parse
+import time
+import calendar
+
+#Definition of conditions for matching of an HTML tag with timestamp, etc.
+#Different functions are returned as NDTV displays news from various\
+#   websites like 'sports.ndtv.com', etc.
+def timestamp_conditions(url_base):
+    if url_base in ['goodtimes.ndtv.com', 'www.ndtv.com', 'food.ndtv.com']:
+        def timestamp_condition(tag):
+            return tag.name == 'span' and tag.has_attr('itemprop') and\
+                   tag['itemprop'] == 'dateModified'
+    elif url_base == 'auto.ndtv.com':
+        def timestamp_condition(tag):
+            return tag.name == 'time' and tag.has_attr('itemprop') and\
+                   tag['itemprop'] == 'dateModified'
+    elif url_base in ['gadgets.ndtv.com', 'movies.ndtv.com'] :
+        def timestamp_condition(tag):
+            return tag.name == 'span' and tag.has_attr('class') and\
+                   tag['class'][0] == 'dtreviewed'
+    elif url_base == 'sports.ndtv.com':
+        def timestamp_condition(tag):
+            return tag.name == 'span' and tag.has_attr('class') and\
+                   tag['class'][0] == 'txt-1'
+    elif url_base == 'profit.ndtv.com':
+        def timestamp_condition(tag):
+            return tag.name == 'div' and tag.has_attr('class') and\
+                   tag['class'][0] == 'ins_dateline'
+    else:
+        def timestamp_condition(tag):
+            return False
+    return timestamp_condition
+
+def content_conditions(url_base):
+    if url_base in ['www.ndtv.com', 'movies.ndtv.com', 'sports.ndtv.com',
+                    'goodtimes.ndtv.com']:
+        def content_condition(tag):
+            return tag.name == 'div' and tag.has_attr('itemprop') and\
+                   tag['itemprop'] == 'articleBody'
+    elif url_base in ['food.ndtv.com', 'profit.ndtv.com']:
+        def content_condition(tag):
+            return tag.name == 'span' and tag.has_attr('itemprop') and\
+                   tag['itemprop'] == 'articleBody'
+    elif url_base in ['auto.ndtv.com']:
+        def content_condition(tag):
+            return tag.name == 'div' and tag.has_attr('class') and\
+                   tag['class'][0] == 'article__content'
+    elif url_base in ['gadgets.ndtv.com']:
+        def content_condition(tag):
+            return tag.name == 'div' and tag.has_attr('class') and\
+                   tag['class'][0] == 'content_text'
+    else:
+        def content_condition(tag):
+            return False
+    return content_condition
+
+def fresh_article_condition(tag):
+    return tag.name == 'a' and tag.parent.name == 'div' and tag.parent.\
+           has_attr('class') and tag.parent['class'][0] == 'nstory_header'
+        
+#Scrapes article from NDTV 
+def scrape_article(url):
+    try:
+        htmltext = urllib.urlopen(url).read()
+    except:
+        return
+    info = {}
+    info['source'] = 'NDTV' 
+    info['url'] = url
+    soup = BeautifulSoup(htmltext, 'html.parser')
+    url_base = urlparse.urlparse(url).hostname
+    
+    try:
+        info['heading'] = soup.title.string.split(' - NDTV')[0].split(
+                          '| NDTV')[0].strip()
+    except:
+        info['heading'] = 'None'
+            
+    info['timestamp'] = ''
+    for tag in soup.find_all(timestamp_conditions(url_base)):
+        if len(list(tag.strings)) == 0:
+            continue
+        big_string = ""
+        for string in tag.strings:
+            if tag.a and string != tag.a.string:
+                big_string += string
+        if url_base == 'profit.ndtv.com' and len(list(tag.strings)) > 1\
+        and 'Updated: ' in big_string:
+            string = big_string.split('Updated: ')[1].strip()
+            # removing brackets for uniform format of timestamp
+            list_str = [c for c in string if c not in '()']
+            info['timestamp'] = ''.join(list_str)
+        elif 'Updated' in list(tag.strings)[0]:
+            try:
+                info['timestamp'] = list(tag.strings)[0].split('Updated: ')[1].strip()
+            except:
+                continue
+            # removing brackets for uniform format of timestamp
+            list_str = [c for c in info['timestamp'] if c not in '()']
+            info['timestamp'] = ''.join(list_str)
+        elif '|' in list(tag.strings)[0]:
+            info['timestamp'] = list(tag.strings)[0].split('|')[1].strip()
+        elif 'Published' in list(tag.strings)[0]:
+            info['timestamp'] = list(tag.strings)[0].split('Published: ')[1].strip()
+        else:
+            info['timestamp'] = list(tag.strings)[0].strip()
+    try:
+        info['timestamp'] = calendar.timegm(time_parse(info['timestamp'],
+                                            ignoretz=True).utctimetuple())
+    except:
+        pass
+    if info['timestamp'] == '':
+        info['timestamp'] = calendar.timegm(datetime.datetime.now().utctimetuple())
+
+    info['content'] = ''
+    for tag in soup.find_all(content_conditions(url_base)):
+        #Choosing text NOT in the first 'div' tag (which contains\
+        #   "Highlights"), any blockquote tags (which contain\
+        #   twitter quotes) and 'script' tags
+        try:
+            strings = [string for string in tag.strings if (not tag.div or\
+                       string not in tag.div.strings) and (not tag.blockquote or\
+                       not any(string in blk.strings for blk in tag.find_all(\
+                       'blockquote'))) and (not tag.script or not any(string in\
+                       scr.strings for scr in tag.find_all('script')))]
+            for string in strings:
+                info['content'] += string + ' '
+            if url_base in ['www.ndtv.com', 'profit.ndtv.com']:
+                content = info['content'][:30].split(':')
+                if len(content) > 1:
+                    info['content'] = content[1] + info['content'][30:]
+            info['content'] = info['content'].strip()
+        except:
+            pass
+    if info['content'] == '':
+        return
+
+    if url_base == 'profit.ndtv.com':
+        info['type'] = 'Business'
+    elif url_base == 'sports.ndtv.com':
+        info['type'] = 'Sports'
+    elif url_base in ['goodtimes.ndtv.com', 'food.ndtv.com']:
+        info['type'] = 'Lifestyle'
+    elif url_base == 'movies.ndtv.com':
+        info['type'] = 'Entertainment'
+    elif url_base == 'www.ndtv.com':
+        pattern = re.compile('http://www.ndtv.com/[a-z]+-news')
+        if 'world-news' in info['url']:
+            info['type'] = 'World'
+        elif 'india-news' in info['url']:
+            info['type'] = 'India'
+        elif 'cities' in info['url'] or re.match(pattern, info['url']):
+            info['type'] = 'City'
+        else:
+            info['type'] = 'Others'
+    elif url_base == 'gadgets.ndtv.com':
+        info['type'] = 'Technology'
+    else:
+        info['type'] = 'Others'
+
+    return info
+
+#Scrape the main website for links to new articles
+def extract_data():
+    try:
+        htmltext = urllib.urlopen('http://www.ndtv.com/latest/').read()
+    except:
+        return
+    soup = BeautifulSoup(htmltext, 'html.parser')
+
+    urls = []
+    for tag in soup.find_all(fresh_article_condition):
+        urls.append(tag['href'])
+    return urls 
+

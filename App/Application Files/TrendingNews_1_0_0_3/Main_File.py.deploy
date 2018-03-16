@@ -1,0 +1,37 @@
+#!/bin/python2
+import sys
+import json
+import os
+
+#sites = ['IndiaToday', 'HindustanTimes', 'TheHindu', 'NDTV',
+#         'HuffPost', 'DNA', 'News18', 'Cricbuzz', 'TimesOfIndia']
+sites = ['News18', 'Cricbuzz', 'NDTV', 'TheHindu']
+
+try:
+    os.stat("Articles/")
+except:
+    os.mkdir("Articles")
+
+print 'Started scraping...'
+for site in sites:
+    importedSite = __import__('Scrape_' + site)
+    urls = importedSite.extract_data()
+    if urls is None:
+        print "Error in ", site
+        continue
+    for i, url in enumerate(urls):
+        article = importedSite.scrape_article(url)
+        if not article:
+            print "Couldn't scrape article in ", site
+            continue
+        try:
+            article_file = open("Articles/" + article["heading"] + ".json", 'w')
+            json.dump(article, article_file)
+            article_file.close()
+            sys.stdout.write("\rScraped %d articles from %s out of %d    "\
+                                "  \r" % (i + 1, site, len(urls)))
+        except:
+            continue
+    print
+print '\nObtained articles\n'
+
